@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .Ruserdata
+
+# cache local du pipeline biodiversité (non versionné)
+scripts/.contour_cache/
