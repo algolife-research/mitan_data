@@ -43,11 +43,11 @@ def main():
 
         code = s.get("code") or ""
         dept = s.get("departement")
-        if not dept and len(code) == 5:
-            # Champ absent pour quelques communes (fusions) : le code INSEE suffit
-            dept = code[:2] if not code.startswith(("2A", "2B")) else code[:2]
         foret = s.get("foret") or {}
         pert = s.get("perturbations") or {}
+        # Les fichiers sans champ departement (anciennes communes fusionnées)
+        # portent des stats incohérentes (perturbations > surface communale) :
+        # on les écarte de l'agrégation.
         if not dept:
             skipped += 1
             continue
