@@ -94,7 +94,29 @@ def bbox_wkt(ring):
     return f"POLYGON(({a} {b},{c} {b},{c} {d},{a} {d},{a} {b}))"
 
 
+# Contours chargés en masse depuis un unique GeoJSON (évite 35 000 appels geo.api).
+BULK_CONTOURS: dict = {}
+
+
+def load_bulk_contours(path_or_url):
+    if path_or_url.startswith("http"):
+        fc = http_json(path_or_url, timeout=180)
+    else:
+        with open(path_or_url) as f:
+            fc = json.load(f)
+    for feat in fc.get("features", []):
+        code = (feat.get("properties") or {}).get("code")
+        if code and feat.get("geometry"):
+            BULK_CONTOURS[code] = feat["geometry"]
+    print(f"Contours chargés en masse : {len(BULK_CONTOURS)} communes")
+
+
 def get_contour(code):
+    if BULK_CONTOURS:
+        geom = BULK_CONTOURS.get(code)
+        if geom is None:
+            raise KeyError("contour absent du GeoJSON groupé")
+        return {"geometry": geom}
     os.makedirs(CONTOUR_CACHE, exist_ok=True)
     cache = os.path.join(CONTOUR_CACHE, f"{code}.json")
     if os.path.exists(cache):
@@ -147,17 +169,26 @@ def commune_codes():
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=0, help="ne traiter que N communes (test)")
-    ap.add_argument("--delay", type=float, default=0.5, help="délai (s) entre communes")
+    ap.add_argument("--delay", type=float, default=0.4, help="délai (s) entre communes")
     ap.add_argument("--force", action="store_true", help="recalculer même si le fichier existe")
+    ap.add_argument("--minutes", type=float, default=0, help="budget-temps (s'arrête proprement au-delà)")
+    ap.add_argument("--communes-geojson", default="", help="GeoJSON groupé des contours (URL ou fichier)")
     args = ap.parse_args()
+
+    if args.communes_geojson:
+        load_bulk_contours(args.communes_geojson)
 
     os.makedirs(NATURE_DIR, exist_ok=True)
     codes = commune_codes()
     if args.limit:
         codes = codes[: args.limit]
 
+    start = time.time()
     done = ok = err = 0
     for code in codes:
+        if args.minutes and (time.time() - start) > args.minutes * 60:
+            print(f"Budget-temps atteint ({args.minutes} min) — arrêt propre, reprise au prochain lancement.")
+            break
         out_path = os.path.join(NATURE_DIR, f"{code}.json")
         if os.path.exists(out_path) and not args.force:
             continue

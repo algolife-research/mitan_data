@@ -1,0 +1,63 @@
+name: Précalcul biodiversité (GBIF)
+
+# Lancement manuel : Actions > Précalcul biodiversité > Run workflow.
+# Le script est repris là où il s'est arrêté (les communes déjà calculées sont sautées),
+# donc plusieurs exécutions successives finissent par tout couvrir.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Nombre max de communes à traiter (0 = toutes)"
+        default: "0"
+      minutes:
+        description: "Budget-temps en minutes (arrêt propre au-delà)"
+        default: "300"
+      delay:
+        description: "Délai entre communes (s), pour rester non abusif"
+        default: "0.4"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: nature-precompute
+  cancel-in-progress: false
+
+jobs:
+  precompute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Télécharger les contours communaux (une seule fois)
+        run: |
+          curl -sSL -o communes.geojson \
+            https://raw.githubusercontent.com/gregoiredavid/france-geojson/master/communes-version-simplifiee.geojson
+          ls -la communes.geojson
+
+      - name: Calculer les résumés biodiversité
+        run: |
+          python3 scripts/fetch_nature_gbif.py \
+            --communes-geojson communes.geojson \
+            --limit "${{ github.event.inputs.limit }}" \
+            --minutes "${{ github.event.inputs.minutes }}" \
+            --delay "${{ github.event.inputs.delay }}"
+
+      - name: Publier les fichiers produits
+        run: |
+          rm -f communes.geojson
+          if [ -z "$(git status --porcelain stats_v2/nature)" ]; then
+            echo "Aucun nouveau fichier — rien à publier."
+            exit 0
+          fi
+          git config user.name "mitan-bot"
+          git config user.email "aumitan@proton.me"
+          git add stats_v2/nature
+          n=$(git diff --cached --name-only | wc -l)
+          git commit -m "data: résumés biodiversité GBIF (+${n} communes)"
+          git push
